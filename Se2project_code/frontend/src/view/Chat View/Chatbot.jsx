@@ -1,12 +1,64 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import axios from 'axios';
 
 const Chatbot = ({ pdfId, pdfContent, onClose, syllabus }) => {
   const [messages, setMessages] = useState([]);
   const [userInput, setUserInput] = useState('');
+  const [currentBotMessage, setCurrentBotMessage] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
+  const [showLoadingDots, setShowLoadingDots] = useState(false);
+  const [hasDisplayedWelcome, setHasDisplayedWelcome] = useState(false);
 
+  useEffect(() => {
+    if (!hasDisplayedWelcome) {
+      const welcomeMessage = 'Hello! I am here to help you with your syllabus. Ask me anything!';
+      setShowLoadingDots(true);
+  
+      setTimeout(() => {
+        setShowLoadingDots(false);
+        simulateTyping(welcomeMessage, 'bot', true, () => {
+          setHasDisplayedWelcome(true);
+        });
+      }, 1000);
+    }
+  }, [hasDisplayedWelcome]);
+  
+  const simulateTyping = (text, sender, addToMessages = true, onComplete = null) => {
+    console.log(`simulateTyping called for: ${text}`);
+    let tempMessage = '';
+    let index = 0;
+  
+    const typingInterval = setInterval(() => {
+      if (index < text.length) {
+        tempMessage += text[index];
+        setCurrentBotMessage(tempMessage);
+        index++;
+      } else {
+        clearInterval(typingInterval);
+        setCurrentBotMessage('');
+  
+        if (addToMessages) {
+          setMessages((prevMessages) => {
+            const exists = prevMessages.some(
+              (msg) => msg.sender === sender && msg.text === text
+            );
+            if (!exists) {
+              return [...prevMessages, { sender, text: tempMessage }];
+            }
+            return prevMessages;
+          });
+        }
+  
+        if (onComplete) {
+          onComplete();
+        }
+  
+        setLoading(false);
+      }
+    }, 50);
+  };  
+  
   const handleSendMessage = async () => {
     if (userInput.trim()) {
       const newMessages = [...messages, { sender: 'user', text: userInput }];
@@ -14,10 +66,11 @@ const Chatbot = ({ pdfId, pdfContent, onClose, syllabus }) => {
       setUserInput('');
       setLoading(true);
       setError(null);
-
+      setCurrentBotMessage(''); 
+      setShowLoadingDots(true); 
       try {
         const payload = { message: userInput, pdfId, pdfContent };
-        console.log("[DEBUG] Sending payload to backend:", payload);
+        console.log('[DEBUG] Sending payload to backend:', payload);
 
         const response = await axios.post(
           'http://localhost:5000/chatbot/chat_with_pdf',
@@ -29,16 +82,18 @@ const Chatbot = ({ pdfId, pdfContent, onClose, syllabus }) => {
         );
 
         if (response.status === 200) {
-          const botResponse = response.data.response.replace(/\n/g, '<br />') || 'No response from the bot.';
-          console.log("[DEBUG] Bot response received:", botResponse);
+          const botResponse = response.data.response || 'No response from the bot.';
+          console.log('[DEBUG] Bot response received:', botResponse);
 
-          setMessages((prevMessages) => [
-            ...prevMessages,
-            { sender: 'bot', text: botResponse },
-          ]);
+          setTimeout(() => {
+            setShowLoadingDots(false);
+            simulateTyping(botResponse, 'bot');
+          }, 1000);
         } else {
           setError(response.data.error || 'Failed to get a valid response.');
           alert('Failed to get a valid response from the chatbot. Please try again.');
+          setLoading(false);
+          setShowLoadingDots(false);
         }
       } catch (error) {
         console.error('[ERROR] Network error:', error.response?.data || error.message);
@@ -50,8 +105,8 @@ const Chatbot = ({ pdfId, pdfContent, onClose, syllabus }) => {
           setError('An unexpected error occurred.');
         }
         alert('An error occurred. Please try again.');
-      } finally {
         setLoading(false);
+        setShowLoadingDots(false);
       }
     }
   };
@@ -63,6 +118,18 @@ const Chatbot = ({ pdfId, pdfContent, onClose, syllabus }) => {
   return (
     <div style={styles.modalOverlay}>
       <div style={styles.chatContainer}>
+        <style>
+          {`
+          @keyframes jump {
+            0%, 100% {
+              transform: translateY(0);
+            }
+            50% {
+              transform: translateY(-10px);
+            }
+          }
+          `}
+        </style>
         <div style={styles.header}>
           <h5 style={styles.title}>
             Chat with PDF: {syllabus?.syllabus_description || 'Untitled'}
@@ -76,10 +143,19 @@ const Chatbot = ({ pdfId, pdfContent, onClose, syllabus }) => {
             <div
               key={index}
               style={msg.sender === 'user' ? styles.userMessage : styles.botMessage}
-              dangerouslySetInnerHTML={{ __html: msg.text }} 
+              dangerouslySetInnerHTML={{ __html: msg.text }}
             />
           ))}
-          {loading && <div style={styles.loadingMessage}>Bot is typing...</div>}
+          {showLoadingDots && (
+            <div style={styles.loadingDotsContainer}>
+              <span style={{ ...styles.dot, animationDelay: '0s' }}></span>
+              <span style={{ ...styles.dot, animationDelay: '0.2s' }}></span>
+              <span style={{ ...styles.dot, animationDelay: '0.4s' }}></span>
+            </div>
+          )}
+          {currentBotMessage && (
+            <div style={styles.botMessage}>{currentBotMessage}</div>
+          )}
           {error && <div style={styles.errorMessage}>{error}</div>}
         </div>
         <div style={styles.inputContainer}>
@@ -175,11 +251,20 @@ const styles = {
     textAlign: 'left',
     fontSize: '1.2rem',
   },
-  loadingMessage: {
-    alignSelf: 'center',
-    color: '#555',
-    fontStyle: 'italic',
-    fontSize: '1.1rem',
+  loadingDotsContainer: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'flex-start',
+    gap: '5px',
+    height: '30px',
+  },
+  dot: {
+    width: '10px',
+    height: '10px',
+    backgroundColor: '#007bff',
+    borderRadius: '50%',
+    animation: 'jump 1s infinite',
+    animationTimingFunction: 'ease-in-out',
   },
   errorMessage: {
     alignSelf: 'center',
