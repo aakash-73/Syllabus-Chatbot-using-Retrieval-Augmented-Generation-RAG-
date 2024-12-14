@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import axios from 'axios';
 
 const Chatbot = ({ pdfId, pdfContent, onClose, syllabus }) => {
@@ -9,12 +9,17 @@ const Chatbot = ({ pdfId, pdfContent, onClose, syllabus }) => {
   const [error, setError] = useState(null);
   const [showLoadingDots, setShowLoadingDots] = useState(false);
   const [hasDisplayedWelcome, setHasDisplayedWelcome] = useState(false);
+  const [typingIntervalId, setTypingIntervalId] = useState(null);
+  const chatBodyRef = useRef(null); // Ref for scrolling to bottom
+  const [editingMessage, setEditingMessage] = useState(null);
+  const [editingText, setEditingText] = useState(''); // New state for editable text
+  const [hoveredMessageIndex, setHoveredMessageIndex] = useState(null); // New state to track hovered message
 
   useEffect(() => {
     if (!hasDisplayedWelcome) {
       const welcomeMessage = 'Hello! I am here to help you with your syllabus. Ask me anything!';
       setShowLoadingDots(true);
-  
+
       setTimeout(() => {
         setShowLoadingDots(false);
         simulateTyping(welcomeMessage, 'bot', true, () => {
@@ -23,21 +28,28 @@ const Chatbot = ({ pdfId, pdfContent, onClose, syllabus }) => {
       }, 1000);
     }
   }, [hasDisplayedWelcome]);
-  
+
+  useEffect(() => {
+    // Scroll to the bottom whenever a new message is added
+    if (chatBodyRef.current) {
+      chatBodyRef.current.scrollTop = chatBodyRef.current.scrollHeight;
+    }
+  }, [messages, currentBotMessage]);
+
   const simulateTyping = (text, sender, addToMessages = true, onComplete = null) => {
-    console.log(`simulateTyping called for: ${text}`);
     let tempMessage = '';
     let index = 0;
-  
-    const typingInterval = setInterval(() => {
+
+    const intervalId = setInterval(() => {
       if (index < text.length) {
         tempMessage += text[index];
         setCurrentBotMessage(tempMessage);
         index++;
       } else {
-        clearInterval(typingInterval);
+        clearInterval(intervalId);
+        setTypingIntervalId(null); // Clear interval ID
         setCurrentBotMessage('');
-  
+
         if (addToMessages) {
           setMessages((prevMessages) => {
             const exists = prevMessages.some(
@@ -49,28 +61,52 @@ const Chatbot = ({ pdfId, pdfContent, onClose, syllabus }) => {
             return prevMessages;
           });
         }
-  
+
         if (onComplete) {
           onComplete();
         }
-  
+
         setLoading(false);
       }
     }, 50);
-  };  
-  
+
+    setTypingIntervalId(intervalId); // Store the interval ID
+  };
+
+  const stopTyping = () => {
+    if (typingIntervalId) {
+      clearInterval(typingIntervalId); // Stop the typing interval
+      setTypingIntervalId(null);
+
+      if (currentBotMessage) {
+        // Finalize the partially typed message
+        setMessages((prevMessages) => [
+          ...prevMessages,
+          { sender: 'bot', text: currentBotMessage },
+        ]);
+        setCurrentBotMessage('');
+      }
+
+      setLoading(false);
+    }
+  };
+
   const handleSendMessage = async () => {
+    if (typingIntervalId) {
+      stopTyping(); // Stop typing if the button is clicked while typing
+      return;
+    }
+
     if (userInput.trim()) {
       const newMessages = [...messages, { sender: 'user', text: userInput }];
       setMessages(newMessages);
       setUserInput('');
       setLoading(true);
       setError(null);
-      setCurrentBotMessage(''); 
-      setShowLoadingDots(true); 
+      setCurrentBotMessage('');
+      setShowLoadingDots(true);
       try {
         const payload = { message: userInput, pdfId, pdfContent };
-        console.log('[DEBUG] Sending payload to backend:', payload);
 
         const response = await axios.post(
           'http://localhost:5000/chatbot/chat_with_pdf',
@@ -83,7 +119,6 @@ const Chatbot = ({ pdfId, pdfContent, onClose, syllabus }) => {
 
         if (response.status === 200) {
           const botResponse = response.data.response || 'No response from the bot.';
-          console.log('[DEBUG] Bot response received:', botResponse);
 
           setTimeout(() => {
             setShowLoadingDots(false);
@@ -115,6 +150,67 @@ const Chatbot = ({ pdfId, pdfContent, onClose, syllabus }) => {
     setUserInput(e.target.value);
   };
 
+  const handleEditMessage = (index) => {
+    const messageToEdit = messages[index];
+    setEditingMessage(index);
+    setEditingText(messageToEdit.text); // Initialize editable text state
+  };
+
+  const saveEditedMessage = async () => {
+    if (editingMessage !== null) {
+        const updatedMessages = [...messages];
+        updatedMessages[editingMessage] = { sender: 'user', text: editingText };
+
+        // Remove all messages below the edited message
+        const truncatedMessages = updatedMessages.slice(0, editingMessage + 1);
+        setMessages(truncatedMessages);
+
+        // Send the updated question to the chatbot and display its response
+        const payload = { message: editingText, pdfId, pdfContent };
+        setLoading(true);
+        setShowLoadingDots(true); // Show loading dots for the new response
+        try {
+            const response = await axios.post(
+                'http://localhost:5000/chatbot/chat_with_pdf',
+                payload,
+                {
+                    withCredentials: true,
+                    headers: { 'Content-Type': 'application/json' },
+                }
+            );
+
+            if (response.status === 200) {
+                const botResponse = response.data.response || 'No response from the bot.';
+
+                setTimeout(() => {
+                    setShowLoadingDots(false);
+                    simulateTyping(botResponse, 'bot'); // Use typing simulation for the new response
+                }, 1000);
+            } else {
+                setError(response.data.error || 'Failed to get a valid response.');
+                alert('Failed to get a valid response from the chatbot. Please try again.');
+            }
+        } catch (error) {
+            console.error('[ERROR] Network error:', error.response?.data || error.message);
+            alert('An error occurred while fetching the response. Please try again.');
+        } finally {
+            setLoading(false);
+        }
+
+        setEditingMessage(null); // Reset editing state
+        setEditingText(''); // Clear editing text state
+    }
+};
+
+  const cancelEditingMessage = () => {
+    setEditingMessage(null); // Reset editing state
+    setEditingText(''); // Clear editing text state
+  };
+
+  const handleEditingTextChange = (e) => {
+    setEditingText(e.target.value);
+  };
+
   return (
     <div style={styles.modalOverlay}>
       <div style={styles.chatContainer}>
@@ -138,13 +234,56 @@ const Chatbot = ({ pdfId, pdfContent, onClose, syllabus }) => {
             &times;
           </button>
         </div>
-        <div style={styles.chatBody}>
+        <div style={styles.chatBody} ref={chatBodyRef}>
           {messages.map((msg, index) => (
             <div
               key={index}
-              style={msg.sender === 'user' ? styles.userMessage : styles.botMessage}
-              dangerouslySetInnerHTML={{ __html: msg.text }}
-            />
+              style={{
+                ...styles.message,
+                ...(msg.sender === 'user' ? styles.userMessage : styles.botMessage),
+                position: 'relative',
+              }}
+              onMouseEnter={() => msg.sender === 'user' && setHoveredMessageIndex(index)}
+              onMouseLeave={() => setHoveredMessageIndex(null)}
+            >
+              {msg.sender === 'user' && editingMessage === index ? (
+                <div>
+                  <input
+                    type="text"
+                    value={editingText}
+                    onChange={handleEditingTextChange}
+                    style={styles.editInput}
+                  />
+                  <button
+                    style={styles.checkButton}
+                    onClick={saveEditedMessage}
+                    title="Save"
+                  >
+                    ✔
+                  </button>
+                  <button
+                    style={styles.cancelButton}
+                    onClick={cancelEditingMessage}
+                    title="Cancel"
+                  >
+                    ❌
+                  </button>
+                </div>
+              ) : (
+                <span dangerouslySetInnerHTML={{ __html: msg.text }} />
+              )}
+              {msg.sender === 'user' && hoveredMessageIndex === index && (
+                <button
+                  style={{
+                    ...styles.editButton,
+                    visibility: hoveredMessageIndex === index ? 'visible' : 'hidden',
+                  }}
+                  onClick={() => handleEditMessage(index)}
+                >
+                  ✏️
+                </button>
+              )}
+            </div>
           ))}
           {showLoadingDots && (
             <div style={styles.loadingDotsContainer}>
@@ -165,14 +304,14 @@ const Chatbot = ({ pdfId, pdfContent, onClose, syllabus }) => {
             onChange={handleInputChange}
             placeholder="Type a message..."
             style={styles.input}
-            disabled={loading}
+            disabled={loading && !typingIntervalId}
           />
           <button
             onClick={handleSendMessage}
             style={styles.sendButton}
-            disabled={loading}
+            disabled={loading && !typingIntervalId}
           >
-            Send
+            {typingIntervalId ? '⏹' : 'Send'}
           </button>
         </div>
       </div>
@@ -240,6 +379,11 @@ const styles = {
     maxWidth: '75%',
     textAlign: 'right',
     fontSize: '1.2rem',
+    position: 'relative',
+    transition: 'transform 0.2s ease-in-out',
+    ':hover': {
+      transform: 'translateX(-10px)',
+    },
   },
   botMessage: {
     alignSelf: 'flex-start',
@@ -250,6 +394,33 @@ const styles = {
     maxWidth: '75%',
     textAlign: 'left',
     fontSize: '1.2rem',
+  },
+  editButton: {
+    position: 'absolute',
+    top: '50%',
+    left: '-60px',
+    transform: 'translateY(-50%)',
+    background: 'none',
+    border: 'none',
+    fontSize: '1.2rem',
+    cursor: 'pointer',
+    color: '#333',
+  },
+  checkButton: {
+    marginLeft: '10px',
+    padding: '5px 10px',
+    fontSize: '1rem',
+    borderRadius: '5px',
+    backgroundColor: 'green',
+    color: '#fff',
+    border: 'none',
+    cursor: 'pointer',
+  },
+  editInput: {
+    fontSize: '1.2rem',
+    padding: '10px',
+    borderRadius: '5px',
+    border: '1px solid #ddd',
   },
   loadingDotsContainer: {
     display: 'flex',
@@ -287,15 +458,32 @@ const styles = {
     marginRight: '20px',
   },
   sendButton: {
-    padding: '20px 30px',
+    padding: '10px 20px',
     fontSize: '1.2rem',
+    borderRadius: '15px',
     backgroundColor: '#007bff',
     color: '#fff',
     border: 'none',
-    borderRadius: '15px',
     cursor: 'pointer',
-    boxShadow: '0 5px 15px rgba(0, 123, 255, 0.4)',
-    transition: 'background-color 0.3s',
+    transition: 'background-color 0.3s ease-in-out',
+    ':hover': {
+      backgroundColor: '#0056b3',
+    },
+  },
+  checkButton: {
+    color: '#28a745',
+    background: 'none',
+    cursor: 'pointer',
+    fontSize: '1.5rem',
+    marginLeft: '5px',
+  },
+  cancelButton: {
+    color: 'red',
+    border: 'none',
+    background: 'none',
+    cursor: 'pointer',
+    fontSize: '1.5rem',
+    marginLeft: '5px',
   },
 };
 

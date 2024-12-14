@@ -1,15 +1,28 @@
-from flask import Blueprint, request, jsonify
-from langchain_huggingface import HuggingFaceEmbeddings  # Updated import
-from config import db
-import numpy as np
-import requests
+import os
 import logging
+import numpy as np
+from flask import Blueprint, request, jsonify
+from groq import Groq
+from config import db  # Ensure db is correctly set up in config
+from langchain_huggingface import HuggingFaceEmbeddings
+import requests
 
+# Flask Blueprint for chatbot routes
 chatbot_controller = Blueprint('chatbot_controller', __name__)
 
+# Groq Client Setup
+GROQ_API_KEY = os.getenv("GROQ_API_KEY", "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")
+client = Groq(api_key=GROQ_API_KEY)
+
+# Primary API URL
+PRIMARY_API_URL = "http://csai01:8000/generate/"
+
+# MongoDB Collection Setup
 collection = db["pdf_embeddings"] if db is not None else None
 
+# Embedding Model Initialization
 embedding_model = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
+
 
 class CustomMongoDBVectorStore:
     def __init__(self, collection, embedding_function):
@@ -60,11 +73,14 @@ class CustomMongoDBVectorStore:
             logging.error(f"[ERROR] Cosine similarity calculation failed: {e}")
             return 0.0
 
+
+# Initialize vector store
 if collection is not None:
     vector_store = CustomMongoDBVectorStore(collection=collection, embedding_function=embedding_model)
 else:
     raise Exception("MongoDB connection failed, 'pdf_embeddings' collection not found.")
 
+# Conversation memory class
 class ConversationMemory:
     def __init__(self):
         self.messages = []
@@ -75,9 +91,48 @@ class ConversationMemory:
     def get_context(self):
         return " ".join([msg["message"] for msg in self.messages])
 
+
 memory = ConversationMemory()
+
+
+def call_primary_api(prompt):
+    """Call the primary API."""
+    try:
+        logging.info("[INFO] Attempting to call the primary API.")
+        payload = {"prompt": prompt, "max_tokens": 512}
+        response = requests.post(PRIMARY_API_URL, json=payload)
+        if response.status_code == 200:
+            response_json = response.json()
+            logging.info("[INFO] Primary API response received successfully.")
+            return response_json.get("response", "No response from primary API.")
+        else:
+            logging.error(f"[ERROR] Primary API call failed: {response.status_code} {response.text}")
+            raise Exception("Primary API call failed.")
+    except Exception as e:
+        logging.error(f"[ERROR] Exception during primary API call: {e}")
+        raise
+
+
+def call_groq_api(chat_history):
+    """Call the Groq AI API."""
+    try:
+        logging.info("[INFO] Attempting to call the Groq AI API.")
+        response = client.chat.completions.create(
+            model="llama3-8b-8192",
+            messages=chat_history,
+            max_tokens=512,
+            temperature=1.2
+        )
+        logging.info("[INFO] Groq API response received successfully.")
+        return response.choices[0].message.content.strip()
+    except Exception as e:
+        logging.error(f"[ERROR] Exception during Groq API call: {e}")
+        raise
+
+
 @chatbot_controller.route('/chat_with_pdf', methods=['POST'])
 def chat_with_pdf():
+    """Route to handle chat with PDF content."""
     try:
         data = request.json
         user_message = data.get("message")
@@ -87,23 +142,34 @@ def chat_with_pdf():
             logging.error("[ERROR] Missing required parameters.")
             return jsonify({"error": "Missing required parameters (message and pdfContent)."}), 400
 
-        prompt = f"PDF Content:\n{pdf_content}\n\nUser Message: {user_message}"
+        prompt = f"PDF Content:\n{pdf_content}\nUser Message: {user_message}"
 
-        api_url = "http://csai01:8000/generate/"
-        payload = {
-            "prompt": prompt,
-            "max_tokens": 512
-        }
+        # Attempt to call primary API
+        try:
+            logging.info("[INFO] Using primary API for response.")
+            primary_response = call_primary_api(prompt)
+            return jsonify({"response": primary_response}), 200
+        except Exception:
+            logging.warning("[WARNING] Primary API failed. Switching to Groq AI.")
+            user_confirmation = data.get("switchToGroq", True)
+            if not user_confirmation:
+                return jsonify({"error": "Primary API failed, and user declined to switch to Groq AI."}), 400
 
-        response = requests.post(api_url, json=payload)
-        if response.status_code == 200:
-            response_json = response.json()
-            bot_response = response_json.get('response', {}).get('content', "I'm not sure about that. Could you rephrase?")
-        else:
-            logging.error(f"[ERROR] API call failed with status code {response.status_code}: {response.text}")
-            return jsonify({"error": "Failed to generate response using the external API."}), 500
-        print(bot_response)
-        return jsonify({"response": bot_response}), 200
+            # Build conversation history for Groq API
+            system_prompt = {
+                "role": "system",
+                "content": (
+                             "You are a helpful assistant. If the user greets you (e.g., 'Hello'), reply politely without summarizing or referencing the document. "
+                             "For all other queries, provide concise and relevant answers."
+                           )
+            }
+
+            chat_history = [system_prompt]
+            chat_history.append({"role": "user", "content": prompt})
+
+            # Call Groq API
+            groq_response = call_groq_api(chat_history)
+            return jsonify({"response": groq_response}), 200
 
     except Exception as e:
         logging.error(f"[ERROR] Exception in /chat_with_pdf: {e}", exc_info=True)
@@ -111,6 +177,7 @@ def chat_with_pdf():
 
 @chatbot_controller.route('/add_pdf_embeddings', methods=['POST'])
 def add_pdf_embeddings():
+    """Route to add PDF embeddings to MongoDB."""
     try:
         data = request.json
         pdf_content = data.get("pdfContent")
