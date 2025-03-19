@@ -15,7 +15,7 @@ GROQ_API_KEY = os.getenv("GROQ_API_KEY", "gsk_8Y83KMDyuElwt4qgVsMYWGdyb3FY30yPaC
 client = Groq(api_key=GROQ_API_KEY)
 
 # Primary API URL
-PRIMARY_API_URL = "http://csai01:8000/generate/"
+PRIMARY_API_URL = "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"
 
 # MongoDB Collection Setup
 collection = db["pdf_embeddings"] if db is not None else None
