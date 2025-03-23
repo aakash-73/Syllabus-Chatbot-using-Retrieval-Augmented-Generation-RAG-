@@ -1,0 +1,3 @@
+Flask==2.3.2
+Flask-MongoEngine==1.0.0
+Flask-Cors==3.0.10

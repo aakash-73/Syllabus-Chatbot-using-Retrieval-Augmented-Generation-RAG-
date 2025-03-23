@@ -1,0 +1,6 @@
+{
+    "python.analysis.extraPaths": [
+        "./Se2project_code/backend/controller",
+        "./Se2project_code/backend/model"
+    ]
+}
