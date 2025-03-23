@@ -29,6 +29,34 @@ const Chatbot = ({ pdfId, pdfContent, onClose, syllabus }) => {
     }
   }, [hasDisplayedWelcome]);
 
+
+  // Handle key press for Enter, Shift + Enter, and Escape
+  useEffect(() => {
+    const handleKeyPress = (e) => {
+      if (e.key === 'Enter') {
+        if (e.shiftKey) {
+          // Shift + Enter: Allow new line in input
+          setUserInput((prevInput) => prevInput +"");
+        } else {
+          // Enter: Send message or save edited message
+          handleSendMessage();
+        }
+      } else if (e.key === 'Escape') {
+        // Escape: Cancel editing
+        if (editingMessage !== null) {
+          https://chatgpt.com/c/67df2ea7-6f78-800e-bd45-46c473c6574f
+          cancelEditingMessage();
+        }
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyPress);
+
+    return () => {
+      window.removeEventListener('keydown', handleKeyPress);
+    };
+  }, [editingMessage, userInput]);
+
   useEffect(() => {
     // Scroll to the bottom whenever a new message is added
     if (chatBodyRef.current) {
@@ -158,49 +186,49 @@ const Chatbot = ({ pdfId, pdfContent, onClose, syllabus }) => {
 
   const saveEditedMessage = async () => {
     if (editingMessage !== null) {
-        const updatedMessages = [...messages];
-        updatedMessages[editingMessage] = { sender: 'user', text: editingText };
+      const updatedMessages = [...messages];
+      updatedMessages[editingMessage] = { sender: 'user', text: editingText };
 
-        // Remove all messages below the edited message
-        const truncatedMessages = updatedMessages.slice(0, editingMessage + 1);
-        setMessages(truncatedMessages);
+      // Remove all messages below the edited message
+      const truncatedMessages = updatedMessages.slice(0, editingMessage + 1);
+      setMessages(truncatedMessages);
 
-        // Send the updated question to the chatbot and display its response
-        const payload = { message: editingText, pdfId, pdfContent };
-        setLoading(true);
-        setShowLoadingDots(true); // Show loading dots for the new response
-        try {
-            const response = await axios.post(
-                'http://localhost:5000/chatbot/chat_with_pdf',
-                payload,
-                {
-                    withCredentials: true,
-                    headers: { 'Content-Type': 'application/json' },
-                }
-            );
+      // Send the updated question to the chatbot and display its response
+      const payload = { message: editingText, pdfId, pdfContent };
+      setLoading(true);
+      setShowLoadingDots(true); // Show loading dots for the new response
+      try {
+        const response = await axios.post(
+          'http://localhost:5000/chatbot/chat_with_pdf',
+          payload,
+          {
+            withCredentials: true,
+            headers: { 'Content-Type': 'application/json' },
+          }
+        );
 
-            if (response.status === 200) {
-                const botResponse = response.data.response || 'No response from the bot.';
+        if (response.status === 200) {
+          const botResponse = response.data.response || 'No response from the bot.';
 
-                setTimeout(() => {
-                    setShowLoadingDots(false);
-                    simulateTyping(botResponse, 'bot'); // Use typing simulation for the new response
-                }, 1000);
-            } else {
-                setError(response.data.error || 'Failed to get a valid response.');
-                alert('Failed to get a valid response from the chatbot. Please try again.');
-            }
-        } catch (error) {
-            console.error('[ERROR] Network error:', error.response?.data || error.message);
-            alert('An error occurred while fetching the response. Please try again.');
-        } finally {
-            setLoading(false);
+          setTimeout(() => {
+            setShowLoadingDots(false);
+            simulateTyping(botResponse, 'bot'); // Use typing simulation for the new response
+          }, 1000);
+        } else {
+          setError(response.data.error || 'Failed to get a valid response.');
+          alert('Failed to get a valid response from the chatbot. Please try again.');
         }
+      } catch (error) {
+        console.error('[ERROR] Network error:', error.response?.data || error.message);
+        alert('An error occurred while fetching the response. Please try again.');
+      } finally {
+        setLoading(false);
+      }
 
-        setEditingMessage(null); // Reset editing state
-        setEditingText(''); // Clear editing text state
+      setEditingMessage(null); // Reset editing state
+      setEditingText(''); // Clear editing text state
     }
-};
+  };
 
   const cancelEditingMessage = () => {
     setEditingMessage(null); // Reset editing state
@@ -248,7 +276,7 @@ const Chatbot = ({ pdfId, pdfContent, onClose, syllabus }) => {
             >
               {msg.sender === 'user' && editingMessage === index ? (
                 <div>
-                  <input
+                  <textarea
                     type="text"
                     value={editingText}
                     onChange={handleEditingTextChange}
@@ -270,7 +298,7 @@ const Chatbot = ({ pdfId, pdfContent, onClose, syllabus }) => {
                   </button>
                 </div>
               ) : (
-                <span dangerouslySetInnerHTML={{ __html: msg.text }} />
+                <span>{msg.text}</span>
               )}
               {msg.sender === 'user' && hoveredMessageIndex === index && (
                 <button
@@ -298,7 +326,7 @@ const Chatbot = ({ pdfId, pdfContent, onClose, syllabus }) => {
           {error && <div style={styles.errorMessage}>{error}</div>}
         </div>
         <div style={styles.inputContainer}>
-          <input
+          <textarea
             type="text"
             value={userInput}
             onChange={handleInputChange}
@@ -377,13 +405,16 @@ const styles = {
     padding: '15px 20px',
     borderRadius: '25px',
     maxWidth: '75%',
-    textAlign: 'right',
+    textAlign: 'justify',
     fontSize: '1.2rem',
     position: 'relative',
     transition: 'transform 0.2s ease-in-out',
     ':hover': {
       transform: 'translateX(-10px)',
     },
+    wordWrap: 'break-word',
+    whiteSpace: 'pre-wrap',
+    overflowWrap: 'break-word',
   },
   botMessage: {
     alignSelf: 'flex-start',
@@ -392,7 +423,7 @@ const styles = {
     padding: '15px 20px',
     borderRadius: '25px',
     maxWidth: '75%',
-    textAlign: 'left',
+    textAlign: 'justify',
     fontSize: '1.2rem',
   },
   editButton: {
@@ -421,6 +452,9 @@ const styles = {
     padding: '10px',
     borderRadius: '5px',
     border: '1px solid #ddd',
+    width: '100%',
+    minHeight: '40px', // Set a minimum height
+    maxHeight: '200px', // Optional: Limit the maximum height of the textarea
   },
   loadingDotsContainer: {
     display: 'flex',
@@ -469,13 +503,6 @@ const styles = {
     ':hover': {
       backgroundColor: '#0056b3',
     },
-  },
-  checkButton: {
-    color: '#28a745',
-    background: 'none',
-    cursor: 'pointer',
-    fontSize: '1.5rem',
-    marginLeft: '5px',
   },
   cancelButton: {
     color: 'red',
