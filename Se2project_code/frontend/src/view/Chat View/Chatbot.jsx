@@ -68,7 +68,11 @@ const Chatbot = ({ pdfId, pdfContent, onClose, syllabus }) => {
 
         setLoading(false);
       }
+<<<<<<< HEAD
     }, 0.0001);
+=======
+    }, 50);
+>>>>>>> b9fb9b400bdabe587c9e8cceb99022bad58f3b6d
 
     setTypingIntervalId(intervalId); // Store the interval ID
   };
@@ -280,7 +284,11 @@ const Chatbot = ({ pdfId, pdfContent, onClose, syllabus }) => {
                   }}
                   onClick={() => handleEditMessage(index)}
                 >
+<<<<<<< HEAD
                   ✏
+=======
+                  ✏️
+>>>>>>> b9fb9b400bdabe587c9e8cceb99022bad58f3b6d
                 </button>
               )}
             </div>
@@ -487,4 +495,8 @@ const styles = {
   },
 };
 
+<<<<<<< HEAD
 export default Chatbot;
+=======
+export default Chatbot;
+>>>>>>> b9fb9b400bdabe587c9e8cceb99022bad58f3b6d

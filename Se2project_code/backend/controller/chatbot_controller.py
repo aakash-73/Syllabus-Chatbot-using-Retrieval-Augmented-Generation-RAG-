@@ -203,4 +203,8 @@ def list_pdf_embeddings():
         return jsonify({"documents": documents}), 200
     except Exception as e:
         logging.error(f"[ERROR] Failed to list PDF embeddings: {e}", exc_info=True)
+<<<<<<< HEAD
         return jsonify({"error": "Failed to list PDF embeddings."}), 500
+=======
+        return jsonify({"error": "Failed to list PDF embeddings."}), 500
+>>>>>>> b9fb9b400bdabe587c9e8cceb99022bad58f3b6d
