@@ -1,32 +1,38 @@
 import os
 import logging
-from mongoengine import connect # type: ignore
-import gridfs # type: ignore
+from dotenv import load_dotenv
+from mongoengine import connect  # type: ignore
+import gridfs  # type: ignore
 
-# Set logging level to reduce PyMongo debug noise
+# Reduce PyMongo debug noise
 logging.getLogger("pymongo").setLevel(logging.WARNING)
 
+load_dotenv()
+
 class Config:
-    # MongoDB connection URI with improved settings
-    MONGODB_URI = os.getenv(
-        "MONGODB_URI",
-        "mongodb+srv://reddyaakash0702:JUTOEc16xfmEgk7f@cluster0.h8hzh.mongodb.net/syllabusdb?"
-        "retryWrites=true&tls=true&tlsAllowInvalidCertificates=true&serverSelectionTimeoutMS=5000"
-    )
+    # Prefer MONGO_URI, fallback to MONGODB_URI for backward compatibility
+    MONGODB_URI = os.getenv("MONGO_URI") or os.getenv("MONGODB_URI")
     DATABASE_NAME = os.getenv("DATABASE_NAME", "syllabusdb")
 
+db = None
+fs = None
+CONNECTION_SUCCESS = False
+
 try:
-    # Establish a connection to MongoDB Atlas with explicit TLS options
+    if not Config.MONGODB_URI:
+        raise ValueError("MONGO_URI (or MONGODB_URI) is not set in environment.")
+
+    # `connect` returns a pymongo.MongoClient
     client = connect(Config.DATABASE_NAME, host=Config.MONGODB_URI)
-    print("Successfully connected to MongoDB Atlas.")
-    
-    # Access the database and initialize GridFS
+
+    # Access the DB and init GridFS
     db = client[Config.DATABASE_NAME]
     fs = gridfs.GridFS(db)
+
     CONNECTION_SUCCESS = True
+    print("Successfully connected to MongoDB Atlas.")
 
 except Exception as e:
-    # Log the error and set connection objects to None
     print(f"[ERROR] Failed to connect to MongoDB: {e}")
     db, fs = None, None
     CONNECTION_SUCCESS = False

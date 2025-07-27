@@ -5,17 +5,20 @@ from flask import Blueprint, request, jsonify
 from groq import Groq
 from config import db  # Ensure db is correctly set up in config
 from langchain_huggingface import HuggingFaceEmbeddings
-import requests
+from openai import OpenAI  # Official OpenAI Python client
 
 # Flask Blueprint for chatbot routes
 chatbot_controller = Blueprint('chatbot_controller', __name__)
 
+# Validate and set OpenAI API key
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+if not OPENAI_API_KEY:
+    raise Exception("OPENAI_API_KEY environment variable is not set.")
+openai_client = OpenAI(api_key=OPENAI_API_KEY)
+
 # Groq Client Setup
 GROQ_API_KEY = os.getenv("GROQ_API_KEY", "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")
 client = Groq(api_key=GROQ_API_KEY)
-
-# Primary API URL
-PRIMARY_API_URL = "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"
 
 # MongoDB Collection Setup
 collection = db["pdf_embeddings"] if db is not None else None
@@ -40,7 +43,7 @@ class CustomMongoDBVectorStore:
             self.collection.insert_one(vector_data)
             logging.info(f"[INFO] Document added successfully with PDF ID: {pdf_id}")
         except Exception as e:
-            logging.error(f"[ERROR] Failed to add document: {e}")
+            logging.error(f"[ERROR] Failed to add document: {e}", exc_info=True)
 
     def search(self, query, top_k=5):
         try:
@@ -68,9 +71,12 @@ class CustomMongoDBVectorStore:
             dot_product = np.dot(vec1, vec2)
             norm_vec1 = np.linalg.norm(vec1)
             norm_vec2 = np.linalg.norm(vec2)
+            if norm_vec1 == 0 or norm_vec2 == 0:
+                logging.warning("[WARNING] Zero norm vector detected in cosine similarity.")
+                return 0.0
             return dot_product / (norm_vec1 * norm_vec2)
         except Exception as e:
-            logging.error(f"[ERROR] Cosine similarity calculation failed: {e}")
+            logging.error(f"[ERROR] Cosine similarity calculation failed: {e}", exc_info=True)
             return 0.0
 
 
@@ -79,6 +85,7 @@ if collection is not None:
     vector_store = CustomMongoDBVectorStore(collection=collection, embedding_function=embedding_model)
 else:
     raise Exception("MongoDB connection failed, 'pdf_embeddings' collection not found.")
+
 
 # Conversation memory class
 class ConversationMemory:
@@ -96,20 +103,21 @@ memory = ConversationMemory()
 
 
 def call_primary_api(prompt):
-    """Call the primary API."""
+    """Call OpenAI API as the primary API (new SDK)."""
     try:
-        logging.info("[INFO] Attempting to call the primary API.")
-        payload = {"prompt": prompt, "max_tokens": 512}
-        response = requests.post(PRIMARY_API_URL, json=payload)
-        if response.status_code == 200:
-            response_json = response.json()
-            logging.info("[INFO] Primary API response received successfully.")
-            return response_json.get("response", "No response from primary API.")
-        else:
-            logging.error(f"[ERROR] Primary API call failed: {response.status_code} {response.text}")
-            raise Exception("Primary API call failed.")
+        logging.info("[INFO] Attempting to call OpenAI primary API.")
+        response = openai_client.chat.completions.create(
+            model="gpt-4o-mini",   # pick the model you actually have access to
+            messages=[
+                {"role": "system", "content": "You are a helpful assistant."},
+                {"role": "user", "content": prompt}
+            ],
+            max_tokens=512,
+            temperature=1.0,
+        )
+        return response.choices[0].message.content.strip()
     except Exception as e:
-        logging.error(f"[ERROR] Exception during primary API call: {e}")
+        logging.error(f"[ERROR] Exception during OpenAI API call: {e}", exc_info=True)
         raise
 
 
@@ -126,7 +134,7 @@ def call_groq_api(chat_history):
         logging.info("[INFO] Groq API response received successfully.")
         return response.choices[0].message.content.strip()
     except Exception as e:
-        logging.error(f"[ERROR] Exception during Groq API call: {e}")
+        logging.error(f"[ERROR] Exception during Groq API call: {e}", exc_info=True)
         raise
 
 
@@ -159,9 +167,9 @@ def chat_with_pdf():
             system_prompt = {
                 "role": "system",
                 "content": (
-                             "You are a helpful assistant. If the user greets you (e.g., 'Hello'), reply politely without summarizing or referencing the document. "
-                             "For all other queries, provide concise and relevant answers."
-                           )
+                    "You are a helpful assistant. If the user greets you (e.g., 'Hello'), reply politely without summarizing or referencing the document. "
+                    "For all other queries, provide concise and relevant answers."
+                )
             }
 
             chat_history = [system_prompt]
@@ -174,6 +182,7 @@ def chat_with_pdf():
     except Exception as e:
         logging.error(f"[ERROR] Exception in /chat_with_pdf: {e}", exc_info=True)
         return jsonify({"error": "An internal server error occurred."}), 500
+
 
 @chatbot_controller.route('/add_pdf_embeddings', methods=['POST'])
 def add_pdf_embeddings():
@@ -195,6 +204,7 @@ def add_pdf_embeddings():
         logging.error(f"[ERROR] Exception in /add_pdf_embeddings: {e}", exc_info=True)
         return jsonify({"error": "Failed to add PDF embeddings."}), 500
 
+
 @chatbot_controller.route('/list_pdf_embeddings', methods=['GET'])
 def list_pdf_embeddings():
     """List all PDF embeddings stored in MongoDB."""
@@ -203,6 +213,4 @@ def list_pdf_embeddings():
         return jsonify({"documents": documents}), 200
     except Exception as e:
         logging.error(f"[ERROR] Failed to list PDF embeddings: {e}", exc_info=True)
-
         return jsonify({"error": "Failed to list PDF embeddings."}), 500
-

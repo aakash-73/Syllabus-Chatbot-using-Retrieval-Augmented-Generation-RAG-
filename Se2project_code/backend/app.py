@@ -9,6 +9,9 @@ from config import Config
 from controller import auth_controller, syllabus_controller
 from groq import Groq
 import logging
+from dotenv import load_dotenv
+load_dotenv()
+
 
 app = Flask(__name__)
 app.config.from_object(Config)
