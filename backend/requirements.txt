@@ -1,0 +1,14 @@
+flask
+flask-cors
+pymongo
+mongoengine
+python-dotenv
+groq
+langchain-huggingface
+sentence-transformers
+scikit-learn
+scipy
+transformers
+pdfminer.six
+pypdf
+pymupdf
