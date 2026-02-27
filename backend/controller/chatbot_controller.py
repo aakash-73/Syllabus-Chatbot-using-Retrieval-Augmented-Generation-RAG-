@@ -4,7 +4,7 @@ import numpy as np
 from flask import Blueprint, request, jsonify
 from groq import Groq
 from config import db  # Ensure db is correctly set up in config
-from langchain_huggingface import HuggingFaceEmbeddings
+from sentence_transformers import SentenceTransformer
 
 # Flask Blueprint for chatbot routes
 chatbot_controller = Blueprint('chatbot_controller', __name__)
@@ -23,7 +23,7 @@ client = Groq(api_key=SECONDARY_API_KEY)
 collection = db["embeddings"] if db is not None else None
 
 # Embedding Model Initialization
-embedding_model = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
+embedding_model = SentenceTransformer("all-MiniLM-L6-v2")
 
 
 class CustomMongoDBVectorStore:
@@ -33,7 +33,7 @@ class CustomMongoDBVectorStore:
 
     def add_document(self, pdf_id, pdf_content):
         try:
-            embedding = self.embedding_function.embed_documents([pdf_content])[0]
+            embedding = self.embedding_function.encode([pdf_content], normalize_embeddings=False)[0]
             vector_data = {
                 "pdf_id": pdf_id,
                 "embedding": embedding.tolist(),
@@ -46,7 +46,7 @@ class CustomMongoDBVectorStore:
 
     def search(self, query, top_k=5):
         try:
-            query_embedding = self.embedding_function.embed_query(query)
+            query_embedding = self.embedding_function.encode(query, normalize_embeddings=False)
             query_vector = np.array(query_embedding)
 
             results = []
@@ -198,7 +198,7 @@ def chat_with_pdf_embeddings():
             return jsonify({"error": "Missing required parameters (message and pdfId)."}), 400
 
         # Step 1: Retrieve relevant chunks for this specific PDF
-        query_embedding = embedding_model.embed_query(user_message)
+        query_embedding = embedding_model.encode(user_message, normalize_embeddings=False)
         query_vector = np.array(query_embedding)
 
         results = []
@@ -314,7 +314,7 @@ def add_pdf_embeddings():
 def list_pdf_embeddings():
     """List all PDF embeddings stored in MongoDB."""
     try:
-        documents = list(collection.find({}, {"pdf_id": 1, "content": 1}))
+        documents = list(collection.find({}, {"_id": 0, "pdf_id": 1, "content": 1}))
         return jsonify({"documents": documents}), 200
     except Exception as e:
         logging.error(f"[ERROR] Failed to list PDF embeddings: {e}", exc_info=True)

@@ -43,7 +43,7 @@ def add_syllabus():
         if not allowed_file(file.filename):
             return jsonify({"error": "Invalid file type. Only PDF files are allowed."}), 400
 
-        # ✅ Store PDF in GridFS
+        # Store PDF in GridFS
         pdf_file_id = fs.put(file, filename=file.filename, content_type='application/pdf')
 
         syllabus = Syllabus(
@@ -76,20 +76,38 @@ def add_syllabus():
 
                 if text_content.strip():
 
-                    # 🔥 Chunking for better retrieval
-                    chunks = [
-                        sentence.strip()
-                            for sentence in re.split(r'(?<=[.!?])\s+', text_content)
-                                if sentence.strip()
-                   ]
-                    
-                    embeddings = embedding_model.encode(chunks)
+                    def create_overlapping_chunks(text, chunk_size=3, overlap=1):
+                        # Split into individual sentences
+                        sentences = [
+                            s.strip()
+                            for s in re.split(r'(?<=[.!?])\s+', text)
+                            if s.strip()
+                        ]
+
+                        chunks = []
+                        step = chunk_size - overlap  # step = 2
+
+                        for i in range(0, len(sentences), step):
+                            chunk = " ".join(sentences[i:i + chunk_size])
+                            if chunk.strip():
+                                chunks.append(chunk)
+
+                        return chunks
+
+                    chunks = create_overlapping_chunks(
+                        text_content,
+                        chunk_size=3,
+                        overlap=1
+                    )
+
+                    logging.info(f"[INFO] Total chunks created: {len(chunks)}")
+
+                    embeddings = embedding_model.encode(chunks, normalize_embeddings=False)
 
                     for chunk, embedding in zip(chunks, embeddings):
                         embeddings_collection.insert_one({
                             "pdf_id": str(pdf_file_id),
-                            "embedding": embedding,
-                            "embedding": embedding.tolist(),
+                            "embedding": embedding.tolist(),  # ✅ removed duplicate line
                             "content": chunk
                         })
 
@@ -100,8 +118,6 @@ def add_syllabus():
 
         except Exception as embed_error:
             logging.error(f"[ERROR] Embedding generation failed: {embed_error}", exc_info=True)
-
-        # ==========================================================
 
         return jsonify({
             "message": "Syllabus added successfully!",
