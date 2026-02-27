@@ -137,7 +137,7 @@ const Chatbot = ({ pdfId, pdfContent, onClose, syllabus }) => {
         const payload = { message: userInput, pdfId, pdfContent };
 
         const response = await axios.post(
-          'http://localhost:5000/chatbot/chat_with_pdf',
+          'http://localhost:5000/chatbot/chat_with_pdf_embeddings',
           payload,
           {
             withCredentials: true,
@@ -199,7 +199,7 @@ const Chatbot = ({ pdfId, pdfContent, onClose, syllabus }) => {
       setShowLoadingDots(true); // Show loading dots for the new response
       try {
         const response = await axios.post(
-          'http://localhost:5000/chatbot/chat_with_pdf',
+          'http://localhost:5000/chatbot/chat_with_pdf_embeddings',
           payload,
           {
             withCredentials: true,

@@ -20,7 +20,7 @@ SECONDARY_API_KEY = os.getenv("SECONDARY_API_KEY")
 client = Groq(api_key=SECONDARY_API_KEY)
 
 # MongoDB Collection Setup
-collection = db["pdf_embeddings"] if db is not None else None
+collection = db["embeddings"] if db is not None else None
 
 # Embedding Model Initialization
 embedding_model = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
@@ -108,7 +108,8 @@ def call_primary_api(prompt):
         response = primary_client.chat.completions.create(
             model="llama-3.1-8b-instant",   # pick the model you actually have access to
             messages=[
-                {"role": "system", "content": "You are a helpful assistant."},
+                {"role": "system", "content": "You are a helpful assistant. If the user greets you (e.g., 'Hello'), reply politely without summarizing or referencing the document. "
+                    "For all other queries, provide concise and relevant answers."},
                 {"role": "user", "content": prompt}
             ],
             max_tokens=512,
@@ -182,7 +183,112 @@ def chat_with_pdf():
         logging.error(f"[ERROR] Exception in /chat_with_pdf: {e}", exc_info=True)
         return jsonify({"error": "An internal server error occurred."}), 500
 
+@chatbot_controller.route('/chat_with_pdf_embeddings', methods=['POST'])
+def chat_with_pdf_embeddings():
+    """
+    Route to handle chat using stored PDF embeddings (RAG-based).
+    """
+    try:
+        data = request.json
+        user_message = data.get("message")
+        pdf_id = data.get("pdfId")
 
+        if not user_message or not pdf_id:
+            logging.error("[ERROR] Missing required parameters.")
+            return jsonify({"error": "Missing required parameters (message and pdfId)."}), 400
+
+        # Step 1: Retrieve relevant chunks for this specific PDF
+        query_embedding = embedding_model.embed_query(user_message)
+        query_vector = np.array(query_embedding)
+
+        results = []
+
+        for doc in collection.find({"pdf_id": pdf_id}):
+            doc_embedding = np.array(doc["embedding"])
+            similarity = vector_store._cosine_similarity(query_vector, doc_embedding)
+            results.append((doc["content"], similarity))
+
+        if not results:
+            logging.warning("[WARNING] No matching embeddings found for this PDF.")
+            return jsonify({"error": "No embeddings found for this PDF ID."}), 404
+
+        results.sort(key=lambda x: x[1], reverse=True)
+
+        # Step 2: Increase top_k and log similarity scores for debugging
+        top_k = 5
+        top_results = results[:top_k]
+        
+        logging.info(f"[DEBUG] Top similarity scores: {[round(score, 4) for _, score in top_results]}")
+
+        # Step 3: Only filter out chunks with near-zero similarity
+        SIMILARITY_THRESHOLD = 0.1
+        top_chunks = [
+            content for content, score in top_results
+            if score > SIMILARITY_THRESHOLD
+        ]
+
+        if not top_chunks:
+            # Fall back to top 3 regardless of score
+            top_chunks = [content for content, _ in results[:3]]
+
+        context = "\n\n".join(top_chunks)
+
+        # Step 4: More flexible prompt that handles paraphrased questions
+        prompt = f"""
+        You are a helpful assistant answering questions about a course syllabus.
+
+        If the user greets you (e.g., 'Hello'), reply politely without referencing the document.
+
+        Use the provided context to answer the question. 
+        The question may be phrased differently from the text — use your understanding to match the intent.
+        For example, "who is teaching this course", "who is the instructor", and "who is the professor" all mean the same thing.
+
+        If the answer truly cannot be found in the context, say "I couldn't find that in the document."
+        Do NOT say that if the answer is present but just worded differently.
+
+        Context:
+        {context}
+
+        Question:
+        {user_message}
+        """
+
+        try:
+            logging.info("[INFO] Using primary API for embedding-based response.")
+            response = call_primary_api(prompt)
+            return jsonify({
+                "response": response,
+                "retrieved_chunks": top_chunks
+            }), 200
+
+        except Exception:
+            logging.warning("[WARNING] Primary API failed. Switching to Groq.")
+            system_prompt = {
+                "role": "system",
+                "content": (
+                    "You are a helpful assistant answering questions about a course syllabus. "
+                    "Use your understanding to match the intent of the question to the context, "
+                    "even if the wording differs. Only say you couldn't find something if it is "
+                    "genuinely absent from the context."
+                )
+            }
+
+            chat_history = [
+                system_prompt,
+                {"role": "user", "content": prompt}
+            ]
+
+            groq_response = call_groq_api(chat_history)
+
+            return jsonify({
+                "response": groq_response,
+                "retrieved_chunks": top_chunks
+            }), 200
+
+    except Exception as e:
+        logging.error(f"[ERROR] Exception in /chat_with_pdf_embeddings: {e}", exc_info=True)
+        return jsonify({"error": "An internal server error occurred."}), 500
+    
 @chatbot_controller.route('/add_pdf_embeddings', methods=['POST'])
 def add_pdf_embeddings():
     """Route to add PDF embeddings to MongoDB."""
